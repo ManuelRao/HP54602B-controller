@@ -30,6 +30,7 @@ FetchContent_MakeAvailable(imgui)
 # along with the specific backends for GLFW and OpenGL3.
 add_executable(${PROJECT_NAME} 
     src/main.cpp 
+    src/HP54602B_manager.cpp
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_demo.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp

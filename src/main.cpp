@@ -6,6 +6,14 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
+// Include our oscilloscope manager header
+#include "headers/HP54602B_manager.h"
+
+//include imgui headers for context and IO
+
+
+OscilloscopeManager* g_oscilloscopeManager = nullptr;
+
 int main() {
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;
@@ -40,6 +48,15 @@ int main() {
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
+
+    g_oscilloscopeManager = new OscilloscopeManager("COM7"); // Replace "COM3" with your actual COM port
+    if (!g_oscilloscopeManager->Connect()) {
+        std::cerr << "Failed to connect to oscilloscope on COM3" << std::endl;
+        delete g_oscilloscopeManager;
+        return -1;
+    }
+
+
     // -------------------------------------------------------------------------
     // MAIN APPLICATION RENDERING LOOP
     // -------------------------------------------------------------------------
@@ -58,14 +75,50 @@ int main() {
             ImGui::Text("Welcome to Scomesh Stage 1 sandbox.");
             
             if (ImGui::Button("Trigger Capture")) {
-                // Future custom code: send packet to HP Oscilloscope hardware
-                std::cout << "Capture button clicked!" << std::endl;
+                // Placeholder for capture logic
+                std::cout << "Triggering waveform capture..." << std::endl;
+                g_oscilloscopeManager->SendCommand(":DIG:TRIG"); // Example SCPI command to trigger capture (replace with actual command as needed)
             }
             ImGui::End();
 
-            // Showing the official demo window so you can see every single type of widget 
-            // and styling capability ImGui has available out of the box.
-            ImGui::ShowDemoWindow();
+            std::vector<uint8_t> displayBuffer;
+            g_oscilloscopeManager->GetLatestData(displayBuffer);
+
+            std::vector<float> plotBuffer(displayBuffer.size());
+            for (size_t i = 0; i < displayBuffer.size(); ++i) {
+                // Cast the raw byte (0-255) to a float (0.0f - 255.0f)
+                plotBuffer[i] = static_cast<float>(displayBuffer[i]);
+            }
+
+            // 3. Build your UI and draw the plot
+            ImGui::Begin("Live Oscilloscope Feed");
+
+            ImGui::Text("Data Points Received: %zu", displayBuffer.size());
+
+            if (!plotBuffer.empty()) {
+                // ImGui::PlotLines parameters:
+                // 1. Label
+                // 2. Pointer to the float array data (.data())
+                // 3. Number of points to draw
+                // 4. Value offset (0)
+                // 5. Overlay text (NULL)
+                // 6. Scale Min (0.0f for an 8-bit ADC)
+                // 7. Scale Max (255.0f for an 8-bit ADC)
+                // 8. Graph Size (ImVec2(0, 150) makes it dynamically stretch to window width, 150px high)
+                
+                ImGui::PlotLines(
+                    "Raw ADC Stream", 
+                    plotBuffer.data(), 
+                    plotBuffer.size(), 
+                    0, 
+                    NULL, 
+                    0.0f, 
+                    255.0f, 
+                    ImVec2(0, 150)
+                );
+            }
+
+            ImGui::End();
         }
 
         // Step 3: Rendering calculations
@@ -93,5 +146,6 @@ int main() {
 
     glfwDestroyWindow(window);
     glfwTerminate();
+    delete g_oscilloscopeManager;
     return 0;
 }
