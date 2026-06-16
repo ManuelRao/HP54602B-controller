@@ -1,0 +1,31 @@
+# ==========================================
+# 1. CMake & Build Outputs (The big stuff)
+# ==========================================
+build/
+.cmake/
+CMakeUserPresets.json
+
+# ==========================================
+# 2. MSVC Compiler & Linker Leftovers
+# ==========================================
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.idb
+*.lnk
+
+# ==========================================
+# 3. VS Code Workspace Settings
+# ==========================================
+.vscode/
+!.vscode/extensions.json
+.history/
+*.code-workspace
+
+# ==========================================
+# 4. Operating System Garbage
+# ==========================================
+Thumbs.db
+Desktop.ini
+.DS_Store
