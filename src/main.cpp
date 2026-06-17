@@ -64,6 +64,7 @@ int main() {
 
         {
             g_oscilloscopeManager->drawConnectionControls();
+            g_oscilloscopeManager->drawTriggerControl();
             std::vector<uint8_t> latestData;
             g_oscilloscopeManager->GetLatestData(latestData);
             g_oscilloscopeManager->drawBasicPloter(latestData);

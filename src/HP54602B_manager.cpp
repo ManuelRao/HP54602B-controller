@@ -409,8 +409,37 @@ void OscilloscopeManager::drawAutoScaleButton() {
 }
 
 void OscilloscopeManager::drawTriggerControl() {
+
+    static int selectedChannel = 1;
+    static int levelMilliVolts = 500;
+    static bool risingEdge = true;
+    static bool __auto = true;
+
     ImGui::Text("Trigger Control");
-    
+    if(ImGui::BeginCombo("Channel", ("CHAN" + std::to_string(selectedChannel)).c_str())) {
+        for (int i = 1; i <= 2; ++i) {
+            bool isSelected = (selectedChannel == i);
+            if (ImGui::Selectable(("CHAN" + std::to_string(i)).c_str(), isSelected)) {
+                selectedChannel = i;
+            }
+            if (isSelected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SliderInt("Level (mV)", &levelMilliVolts, -5000, 5000);
+    if(ImGui::RadioButton("Rising Edge", risingEdge == true)) {
+        risingEdge = true;
+    }
+    ImGui::SameLine();
+    if(ImGui::RadioButton("Falling Edge", risingEdge == false)) {
+        risingEdge = false;
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("Auto Trigger", &__auto);
+    if (ImGui::Button("Apply Trigger Settings")) {
+        SetTrigger(selectedChannel, levelMilliVolts / 1000.0f, risingEdge);
+    }
+
 
 
 }
