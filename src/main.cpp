@@ -49,12 +49,7 @@ int main() {
     ImGui_ImplOpenGL3_Init("#version 330");
 
 
-    g_oscilloscopeManager = new OscilloscopeManager("COM7"); // Replace "COM3" with your actual COM port
-    if (!g_oscilloscopeManager->Connect()) {
-        std::cerr << "Failed to connect to oscilloscope on COM3" << std::endl;
-        delete g_oscilloscopeManager;
-        return -1;
-    }
+    g_oscilloscopeManager = new OscilloscopeManager(); 
 
 
     // -------------------------------------------------------------------------
@@ -63,64 +58,20 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // Step 1: Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Step 2: Define your UI Components (This is where your layout code lives)
         {
-            // A simple control panel window
-            ImGui::Begin("Oscilloscope Control Panel");
-            ImGui::Text("Welcome to Scomesh Stage 1 sandbox.");
-            
-            if (ImGui::Button("Trigger Capture")) {
-                // Placeholder for capture logic
-                std::cout << "Triggering waveform capture..." << std::endl;
-                g_oscilloscopeManager->SendCommand(":DIG:TRIG"); // Example SCPI command to trigger capture (replace with actual command as needed)
-            }
-            ImGui::End();
-
-            std::vector<uint8_t> displayBuffer;
-            g_oscilloscopeManager->GetLatestData(displayBuffer);
-
-            std::vector<float> plotBuffer(displayBuffer.size());
-            for (size_t i = 0; i < displayBuffer.size(); ++i) {
-                // Cast the raw byte (0-255) to a float (0.0f - 255.0f)
-                plotBuffer[i] = static_cast<float>(displayBuffer[i]);
-            }
-
-            // 3. Build your UI and draw the plot
-            ImGui::Begin("Live Oscilloscope Feed");
-
-            ImGui::Text("Data Points Received: %zu", displayBuffer.size());
-
-            if (!plotBuffer.empty()) {
-                // ImGui::PlotLines parameters:
-                // 1. Label
-                // 2. Pointer to the float array data (.data())
-                // 3. Number of points to draw
-                // 4. Value offset (0)
-                // 5. Overlay text (NULL)
-                // 6. Scale Min (0.0f for an 8-bit ADC)
-                // 7. Scale Max (255.0f for an 8-bit ADC)
-                // 8. Graph Size (ImVec2(0, 150) makes it dynamically stretch to window width, 150px high)
-                
-                ImGui::PlotLines(
-                    "Raw ADC Stream", 
-                    plotBuffer.data(), 
-                    plotBuffer.size(), 
-                    0, 
-                    NULL, 
-                    0.0f, 
-                    255.0f, 
-                    ImVec2(0, 150)
-                );
-            }
-
-            ImGui::End();
+            g_oscilloscopeManager->drawConnectionControls();
+            std::vector<uint8_t> latestData;
+            g_oscilloscopeManager->GetLatestData(latestData);
+            g_oscilloscopeManager->drawBasicPloter(latestData);
+           
         }
 
+        //DEMO WINDOW (REMOVE LATER)
+        ImGui::ShowDemoWindow();
         // Step 3: Rendering calculations
         ImGui::Render();
         int display_w, display_h;

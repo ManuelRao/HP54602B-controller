@@ -46,6 +46,7 @@ find_package(OpenGL REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE 
     glfw 
     OpenGL::GL
+    setupapi
 )
 
 # Tell our compiler where to find both ImGui's core headers and its backend headers
