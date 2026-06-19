@@ -23,6 +23,7 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 
     GLFWwindow* window = glfwCreateWindow(1280, 720, "Scomesh Custom Workspace", NULL, NULL);
     if (!window) {
@@ -30,6 +31,7 @@ int main() {
         return -1;
     }
     glfwMakeContextCurrent(window);
+    glfwMaximizeWindow(window);
     glfwSwapInterval(1); // Enable VSync to lock at 60 FPS cleanly
 
     // -------------------------------------------------------------------------
@@ -65,6 +67,12 @@ int main() {
         {
             g_oscilloscopeManager->drawConnectionControls();
             g_oscilloscopeManager->drawTriggerControl();
+            g_oscilloscopeManager->drawTimebaseControl();
+            g_oscilloscopeManager->drawAcquisitionControl();
+            g_oscilloscopeManager->drawMeasurementControlls();
+            g_oscilloscopeManager->drawDisplayModeControl();
+            g_oscilloscopeManager->drawDataFormatControl();
+            g_oscilloscopeManager->drawMultiChannelControls({1, 2, 3, 4});
             std::vector<uint8_t> latestData;
             g_oscilloscopeManager->GetLatestData(latestData);
             g_oscilloscopeManager->drawBasicPloter(latestData);

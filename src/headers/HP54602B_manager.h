@@ -33,6 +33,9 @@ private:
     HANDLE m_hSerial;
     std::string m_comPort;
 
+    int m_timebaseIndex = 3;
+    float verticalScale[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
+
     // The background loop function
     void WorkerLoop();
     std::string ReadTextResponse();
@@ -56,6 +59,7 @@ public:
 
     void SetVerticalScale(const int& channel, const float& scale);
     void SetAcquisitionMode(const std::string& mode);
+    void SetAverageCount(const int& count);
     void SetCoupling(const int& channel, const std::string& couplingType);
     void SetHorizontalPosition(const float& position);
     void SetVerticalPosition(const int& channel, const float& position);
@@ -72,7 +76,7 @@ public:
 
     // UI drawing function 
     //----------------------------------
-    void drawControlUI();
+    void drawAllControls();
     void drawConnectionControls();
     void drawBasicPloter(const std::vector<uint8_t>& data);
     // individual control drawing functions for each setting category (called by drawControlUI)
@@ -83,13 +87,14 @@ public:
     void drawMeasurementControlls();
     void drawDisplayModeControl();
     void drawDataFormatControl();
-    void drawChannelControls(const std::vector<int>& channels); // this will call the individual channel control functions below for each channel in the list
     void drawChannelToggle(const int& channel);
     void drawVerticalScaleControl(const int& channel);
     void drawCouplingControl(const int& channel);
     void drawVerticalPositionControl(const int& channel);
     void drawProbeAttenuationControl(const int& channel);
     void drawBandwidthLimitControl(const int& channel);
+    void drawMultiChannelControls(const std::vector<int>& channels); // this will call the individual channel control functions below for each channel in the list
+    void drawChannelControls(const int& channel);
     
 
 };

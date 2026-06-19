@@ -75,6 +75,13 @@ std::string OscilloscopeManager::ReadTextResponse() {
     return response;
 }
 
+
+/*
+--------------------------------
+BACKGROUND WORKER THREAD FUNCTION
+--------------------------------
+*/
+
 void OscilloscopeManager::WorkerLoop() {
     while (m_isRunning) {
         if (m_hSerial == INVALID_HANDLE_VALUE) {
@@ -294,6 +301,11 @@ void OscilloscopeManager::SetChannelOnOff(const int& channel, bool on) {
     SendCommand(cmd);
 }
 
+void OscilloscopeManager::SetAverageCount(const int& count) {
+    std::string cmd = ":ACQ:AVER " + std::to_string(count) + "\n";
+    SendCommand(cmd);
+}
+
 void OscilloscopeManager::GetMeasurementResult(const std::string& measurementType, const int& channel, std::string& outResult) {
     std::string queryCmd = ":MEAS?" + measurementType + " CHAN" + std::to_string(channel) + "\n";
     SendCommand(queryCmd);
@@ -314,13 +326,6 @@ void OscilloscopeManager::GetCurrentSettings(std::unordered_map<std::string, std
 UI DRAWING FUNCTIONS 
 --------------------
 */
-
-void OscilloscopeManager::drawControlUI() {
-    ImGui::Begin("Oscilloscope Control Panel");
-    
-
-    ImGui::End();
-}
 
 void OscilloscopeManager::drawBasicPloter(const std::vector<uint8_t>& data) {
     ImGui::Begin("Waveform Plot");
@@ -417,7 +422,7 @@ void OscilloscopeManager::drawTriggerControl() {
 
     ImGui::Text("Trigger Control");
     if(ImGui::BeginCombo("Channel", ("CHAN" + std::to_string(selectedChannel)).c_str())) {
-        for (int i = 1; i <= 2; ++i) {
+        for (int i = 1; i <= 4; ++i) {
             bool isSelected = (selectedChannel == i);
             if (ImGui::Selectable(("CHAN" + std::to_string(i)).c_str(), isSelected)) {
                 selectedChannel = i;
@@ -439,10 +444,236 @@ void OscilloscopeManager::drawTriggerControl() {
     if (ImGui::Button("Apply Trigger Settings")) {
         SetTrigger(selectedChannel, levelMilliVolts / 1000.0f, risingEdge);
     }
-
-
-
 }
 
+void OscilloscopeManager::drawTimebaseControl() {
+    const float timebaseValues[] = {
+        0.000000002f, 0.000000005f, 0.00000001f, 0.00000002f, 0.00000005f, 0.0000001f, 0.0000002f, 0.0000005f, 0.000001f, 0.000002f, 0.000005f, 0.00001f, 0.00002f, 0.00005f, 0.0001f, 0.0002f, 0.0005f, 0.001f, 0.002f, 0.005f, 0.010f, 0.020f, 0.050f, 0.100f, 0.200f, 0.500f, 1.000f, 2.000f, 5.000f
+    };
+    
+    // 2. Define the exact text you want to appear inside the slider for each step
+    const char* timebaseLabels[] = {
+        "2 ns/div", "5 ns/div", "10 us/div", "20 ns/div", "50 ns/div", "100 ns/div", "200 ns/div", "500 ns/div", "1 us/div", "2 us/div", "5 us/div", "10 us/div", "20 us/div", "50 us/div", "100 us/div", "200 us/div", "500 us/div", "1 ms/div", "2 ms/div", "5 ms/div", "10 ms/div", "20 ms/div", "50 ms/div", "100 ms/div", "200 ms/div", "500 ms/div", "1 s/div", "2 s/div", "5 s/div"
+    };
+    
+    // Calculate how many steps are in our array
+    int maxIndex = (sizeof(timebaseValues) / sizeof(float)) - 1;
 
+    ImGui::Text("Timebase Control");
+    if(ImGui::SliderInt("Timebase", &m_timebaseIndex, 0, maxIndex, timebaseLabels[m_timebaseIndex])) {
+        SetTimebase(timebaseValues[m_timebaseIndex]);
+    }
+}
 
+void OscilloscopeManager::drawAcquisitionControl() {
+    static int selectedMode = 0; // 0: NORM, 1: PEAK, 2: AVER
+    const char* modes[] = { "NORM", "PEAK", "AVER" };
+
+    ImGui::Text("Acquisition Control");
+    if (ImGui::Combo("Mode", &selectedMode, modes, IM_ARRAYSIZE(modes))) {
+        SetAcquisitionMode(modes[selectedMode]);
+    }
+    if (selectedMode == 2) { // If AVERaging is selected, show an additional slider for the number of averages
+        static int numAverages = 16;
+        if(ImGui::SliderInt("Average Count", &numAverages, 2, 256)){
+            SetAverageCount(numAverages);
+        }
+    }
+}
+
+void OscilloscopeManager::drawMeasurementControlls() {
+    static int selectedChannel = 1;
+    static int selectedMeasurement = 0; // 0: FREQ, 1: PER, 2: VPP, etc.
+    const char* measurements[] = { "FREQ", "PER", "VPP", "VAVG", "VRMS" };
+
+    ImGui::Text("Measurement Controls");
+    if(ImGui::BeginCombo("Measure in channel", ("CHAN" + std::to_string(selectedChannel)).c_str())) {
+        for (int i = 1; i <= 4; ++i) {
+            bool isSelected = (selectedChannel == i);
+            if (ImGui::Selectable(("CHAN" + std::to_string(i)).c_str(), isSelected)) {
+                selectedChannel = i;
+            }
+            if (isSelected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    if(ImGui::Combo("Measurement Type", &selectedMeasurement, measurements, IM_ARRAYSIZE(measurements))) {
+        SetMeasurement(measurements[selectedMeasurement], selectedChannel);
+    }
+}
+
+void OscilloscopeManager::drawDisplayModeControl() {
+    static int selectedMode = 0; // 0: YT, 1: XY
+    const char* modes[] = { "YT", "XY" };
+
+    ImGui::Text("Display Mode Control");
+    if (ImGui::RadioButton("Y-T Mode", selectedMode == 0)) {
+        selectedMode = 0;
+        SetDisplayMode(modes[selectedMode]);
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("X-Y Mode", selectedMode == 1)) {
+        selectedMode = 1;
+        SetDisplayMode(modes[selectedMode]);
+    }
+}
+
+void OscilloscopeManager::drawDataFormatControl() {
+    static int selectedFormat = 0; // 0: BYTE, 1: WORD, 2: ASCII
+    const char* formats[] = { "BYTE", "WORD", "ASCII" };
+
+    ImGui::Text("Data Format Control");
+    if (ImGui::Combo("Format", &selectedFormat, formats, IM_ARRAYSIZE(formats))) {
+        SetDataFormat(formats[selectedFormat]);
+    }
+}
+
+void OscilloscopeManager::drawChannelToggle(const int& channel) {
+    static bool channelOn[4] = { true, true, false, false }; // Default states for 4 channels
+
+    ImGui::Text("Channel %d Toggle", channel);
+    if (ImGui::Checkbox(("##Enable CHAN" + std::to_string(channel)).c_str(), &channelOn[channel - 1])) {
+        SetChannelOnOff(channel, channelOn[channel - 1]);
+    }
+} 
+
+void OscilloscopeManager::drawVerticalScaleControl(const int& channel) { // Default scales for 4 channels
+    ImGui::Text("Channel %d Vertical Scale", channel);
+    if (ImGui::BeginCombo(("##Scale##CHAN" + std::to_string(channel)).c_str(), (std::to_string(verticalScale[channel - 1]) + " V/div").c_str())) {
+        for (float scale : {0.002f, 0.005f, 0.01f, 0.02f, 0.05f, 0.1f, 0.2f, 0.5f, 1.0f, 2.0f, 5.0f}) {
+            bool isSelected = (verticalScale[channel - 1] == scale);
+            if (ImGui::Selectable((std::to_string(scale) + " V/div").c_str(), isSelected)) {
+                verticalScale[channel - 1] = scale;
+                SetVerticalScale(channel, scale);
+            }
+            if (isSelected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+}
+
+void OscilloscopeManager::drawCouplingControl(const int& channel) {
+    static int selectedCoupling[4] = { 0, 0, 0, 0 }; // Default coupling for 4 channels
+    const char* couplingTypes[] = { "DC", "AC", "GND" };
+
+    ImGui::Text("Channel %d Coupling", channel);
+    if (ImGui::Combo(("##Coupling##CHAN" + std::to_string(channel)).c_str(), &selectedCoupling[channel - 1], couplingTypes, IM_ARRAYSIZE(couplingTypes))) {
+        SetCoupling(channel, couplingTypes[selectedCoupling[channel - 1]]);
+    }
+}
+
+void OscilloscopeManager::drawVerticalPositionControl(const int& channel) {
+    static float verticalPosition[4] = { 0.0f, 0.0f, 0.0f, 0.0f }; // Default positions for 4 channels
+
+    ImGui::Text("Channel %d Vertical Position", channel);
+    if (ImGui::SliderFloat(("##Position##CHAN" + std::to_string(channel)).c_str(), &verticalPosition[channel - 1], verticalScale[channel - 1] * -4.0f, verticalScale[channel - 1] * 4.0f, "%.2f V")) {
+        SetVerticalPosition(channel, verticalPosition[channel - 1]);
+    }
+}
+
+void OscilloscopeManager::drawProbeAttenuationControl(const int& channel) {
+    static int selectedAttenuation[4] = { 0, 0, 0, 0 }; // Default attenuation for 4 channels
+    const char* attenuationTypes[] = { "1X", "10X", "100X" };
+
+    ImGui::Text("Channel %d Probe Attenuation", channel);
+    if (ImGui::Combo(("##Attenuation##CHAN" + std::to_string(channel)).c_str(), &selectedAttenuation[channel - 1], attenuationTypes, IM_ARRAYSIZE(attenuationTypes))) {
+        SetProbeAttenuation(channel, attenuationTypes[selectedAttenuation[channel - 1]]);
+    }
+}
+
+void OscilloscopeManager::drawChannelControls(const int& channel){
+    ImGui::Text("Channel %d Controls", channel);
+    drawChannelToggle(channel);
+    drawVerticalScaleControl(channel);
+    drawCouplingControl(channel);
+    drawVerticalPositionControl(channel);
+    drawProbeAttenuationControl(channel);
+}
+
+void OscilloscopeManager::drawMultiChannelControls(const std::vector<int>& channels) {
+
+    ImGui::Text("Channel Controls");
+    if (channels.empty()) {
+        ImGui::Text("No channels selected");
+        return;
+    }
+    
+    if (channels.size() > 4) {
+        ImGui::Text("Too many channels selected. Max is 4.");
+        return;
+    }
+    if (channels.size() == 1) {
+        drawChannelControls(channels[0]);
+        return;
+    }
+
+    int tableFlags = ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchProp;
+    float windowWidth = ImGui::GetWindowSize().x;
+
+    if (windowWidth < 300) {
+        // NARROW WINDOW: Stack vertically without a table
+        for (int channel : channels) {
+            // Draw a pseudo-header for the vertical stack
+            ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "CH %d", channel); 
+            ImGui::Separator();
+            drawChannelControls(channel);
+            ImGui::Spacing();
+        }
+    } else {
+        // MEDIUM OR WIDE WINDOW: Use Tables
+        
+        // Decide columns: If under 600px, max 2 columns. If over 600px, 1 column per channel.
+        int numColumns = (windowWidth < 600) ? 2 : channels.size();
+
+        // Safety check: Don't draw 4 columns if we only have 3 channels
+        if (numColumns > channels.size()) {
+            numColumns = channels.size(); 
+        }
+
+        if (ImGui::BeginTable("##LateralCollection", numColumns, tableFlags)) {
+            
+            for (int channel : channels) {
+                // This magic function automatically jumps to the next column, 
+                // and drops to a new row perfectly if it hits the edge!
+                ImGui::TableNextColumn();
+                
+                // Draw our own header INSIDE the cell so it repeats on wrapped rows
+                ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "CH %d", channel);
+                ImGui::Separator();
+                
+                drawChannelControls(channel);
+            }
+            
+            ImGui::EndTable();
+        }
+    }
+}
+
+void OscilloscopeManager::drawAllControls() {
+    drawConnectionControls();
+    if (!m_isConnected) {
+        ImGui::Text("Please connect to an oscilloscope to access controls.");
+        return;
+    }
+
+    if (m_isConnected) {
+        if (ImGui::CollapsingHeader("Basic Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawAutoScaleButton();
+            drawTriggerControl();
+            drawTimebaseControl();
+            drawAcquisitionControl();
+            drawMeasurementControlls();
+            drawDisplayModeControl();
+            drawDataFormatControl();
+        }
+        if (ImGui::CollapsingHeader("Channel Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawMultiChannelControls({1, 2, 3, 4});
+        }
+        if (ImGui::CollapsingHeader("Ploter", ImGuiTreeNodeFlags_DefaultOpen)) {
+            std::vector<uint8_t> data;
+            GetLatestData(data);
+            drawBasicPloter(data);
+        }
+    }
+}
