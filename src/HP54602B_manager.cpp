@@ -9,9 +9,32 @@ OscilloscopeManager::~OscilloscopeManager() {
 }
 
 bool OscilloscopeManager::Connect(const std::string& comPort) {
-    // 1. Open the COM Port
     m_comPort = comPort;
     std::string portPath = "\\\\.\\" + m_comPort;
+    
+    // --- 1. THE CH340 PRIMER WAKE-UP SEQUENCE ---
+    std::cout << "Priming CH340 adapter at 9600 baud..." << std::endl;
+    HANDLE hPrimer = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    
+    if (hPrimer != INVALID_HANDLE_VALUE) {
+        // Force the clock down to 9600 to stabilize the internal state machine
+        DCB dcbPrimer = {0};
+        dcbPrimer.DCBlength = sizeof(dcbPrimer);
+        GetCommState(hPrimer, &dcbPrimer);
+        dcbPrimer.BaudRate = CBR_9600; 
+        SetCommState(hPrimer, &dcbPrimer);
+        
+        // Dump any garbage in the physical silicon buffer
+        PurgeComm(hPrimer, PURGE_RXCLEAR | PURGE_TXCLEAR);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // Sever the connection, forcing the chip into a clean, ready state
+        CloseHandle(hPrimer);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150)); 
+    }
+
+    // --- 2. THE REAL CONNECTION ---
+    std::cout << "Reconnecting at 19200 baud for Scomesh..." << std::endl;
     m_hSerial = CreateFileA(portPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
 
     if (m_hSerial == INVALID_HANDLE_VALUE) {
@@ -19,33 +42,50 @@ bool OscilloscopeManager::Connect(const std::string& comPort) {
         return false;
     }
 
-    // 2. Configure hardware settings
-    DCB dcbSerialParams = {0};
-    dcbSerialParams.DCBlength = sizeof(dcbSerialParams);
-    GetCommState(m_hSerial, &dcbSerialParams);
+    // 1. THE NUCLEAR DCB: Turn off ALL hardware braking. 
+    // We are acting like a dumb, deaf terminal just to get the door open.
+    DCB dcb = {0};
+    dcb.DCBlength = sizeof(dcb);
+    GetCommState(m_hSerial, &dcb);
     
-    dcbSerialParams.BaudRate = CBR_19200; 
-    dcbSerialParams.ByteSize = 8;
-    dcbSerialParams.StopBits = ONESTOPBIT;
-    dcbSerialParams.Parity = NOPARITY;
-    dcbSerialParams.fDtrControl = DTR_CONTROL_ENABLE; // Hardware flow control
+    dcb.BaudRate = CBR_19200; 
+    dcb.ByteSize = 8;
+    dcb.StopBits = ONESTOPBIT;
+    dcb.Parity = NOPARITY;
+    
+    dcb.fDtrControl = DTR_CONTROL_DISABLE; // Handled manually below
+    dcb.fRtsControl = RTS_CONTROL_DISABLE; // Handled manually below
+    dcb.fOutxCtsFlow = FALSE;   
+    dcb.fOutxDsrFlow = FALSE;  
+    dcb.fOutX = FALSE;
+    dcb.fInX = FALSE;
+    SetCommState(m_hSerial, &dcb);
 
-    SetCommState(m_hSerial, &dcbSerialParams);
+    // 2. THE SECRET WAKE-UP CALL: Force the voltage high manually
+    EscapeCommFunction(m_hSerial, SETDTR);
+    EscapeCommFunction(m_hSerial, SETRTS);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    // 3. Setup timeouts
+    // 3. GENEROUS TIMEOUTS
     COMMTIMEOUTS timeouts = {0};
     timeouts.ReadIntervalTimeout = 50;
-    timeouts.ReadTotalTimeoutConstant = 500;
-    timeouts.ReadTotalTimeoutMultiplier = 10;
+    timeouts.ReadTotalTimeoutConstant = 1000;
+    timeouts.WriteTotalTimeoutConstant = 1000; 
     SetCommTimeouts(m_hSerial, &timeouts);
 
-    // 4. Send initial SCPI configuration
-    std::string setupCmd = ":WAV:POIN 500; :WAV:FORM BYTE\n";
+    PurgeComm(m_hSerial, PURGE_RXCLEAR | PURGE_TXCLEAR);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // 4. THE POKE: Send one single command to see if it flinches
+    std::cout << "Poking the oscilloscope..." << std::endl;
+    std::string setupCmd = "*CLS\n";
     DWORD bytesWritten;
     WriteFile(m_hSerial, setupCmd.c_str(), setupCmd.length(), &bytesWritten, NULL);
+    
+    std::cout << "Bytes written to port: " << bytesWritten << std::endl;
 
-    // 5. Ignite the background thread
-    m_isRunning = true;
+    // DO NOT start the worker thread yet!
+    m_isRunning = true; 
     m_workerThread = std::thread(&OscilloscopeManager::WorkerLoop, this);
     
     return true;
@@ -75,6 +115,21 @@ std::string OscilloscopeManager::ReadTextResponse() {
     return response;
 }
 
+void OscilloscopeManager::AddLog(LogDirection dir, const std::string& msg) {
+    std::lock_guard<std::mutex> lock(m_logMutex);
+    
+    // Optional: Prevent the log from eating all your RAM if left running for days
+    if (m_terminalLog.size() > 1000) {
+        m_terminalLog.erase(m_terminalLog.begin()); 
+    }
+    
+    // Clean up invisible characters so ImGui doesn't render weird boxes
+    std::string cleanMsg = msg;
+    cleanMsg.erase(std::remove(cleanMsg.begin(), cleanMsg.end(), '\n'), cleanMsg.end());
+    cleanMsg.erase(std::remove(cleanMsg.begin(), cleanMsg.end(), '\r'), cleanMsg.end());
+
+    m_terminalLog.push_back({dir, cleanMsg});
+}
 
 /*
 --------------------------------
@@ -86,6 +141,7 @@ void OscilloscopeManager::WorkerLoop() {
     while (m_isRunning) {
         if (m_hSerial == INVALID_HANDLE_VALUE) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::cerr << "Serial port not valid in worker thread. Retrying..." << std::endl;
             continue; // Skip this iteration if the serial port isn't valid
         }
 
@@ -97,15 +153,23 @@ void OscilloscopeManager::WorkerLoop() {
                     DWORD bytesWritten;
                     WriteFile(m_hSerial, cmd.c_str(), cmd.length(), &bytesWritten, NULL);
                     std::cout << "Worker sent command: " << cmd << std::endl;
+                    AddLog(LogDirection::TX, cmd);
 
                     if (cmd.find("?") != std::string::npos){
-                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        std::string response = ReadTextResponse();
+                        if (response.empty()) {
+                            response = "No response received.";
+                            AddLog(LogDirection::ERR, "Warning: No response received for command: " + cmd);
+                        }
 
-
+                        AddLog(LogDirection::RX, response);
+                        std::lock_guard<std::mutex> respLock(m_responseMutex);
+                        m_responseMap[cmd] = response;
                     }
                     
 
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
                 }
             }
             m_commandQueue.clear(); // Clear after processing
@@ -116,23 +180,37 @@ void OscilloscopeManager::WorkerLoop() {
         std::string request = ":WAV:DATA?\n";
         DWORD bytesWritten;
         WriteFile(m_hSerial, request.c_str(), request.length(), &bytesWritten, NULL);
+        AddLog(LogDirection::TX, request);
 
-
-        // interpret the incoming binary blob according to the HP54602B's SCPI format:
-        //  Wait for the '#' sync byte that indicates the start of a new waveform frame
+        // 2. The Robust Sync Loop
         DWORD bytesRead = 0;
         char syncByte = 0;
         bool synced = false;
+        
+        int maxRetries = 3; 
 
-        while (ReadFile(m_hSerial, &syncByte, 1, &bytesRead, NULL) && bytesRead == 1) {
-            if (syncByte == '#') {
-                synced = true;
-                break;
+        while (maxRetries > 0 && m_isRunning) {
+            if (ReadFile(m_hSerial, &syncByte, 1, &bytesRead, NULL)) {
+                if (bytesRead == 1) {
+                    if (syncByte == '#') {
+                        synced = true;
+                        break; 
+                    } else {
+                        // Discard stray bytes (like leftover newlines) silently
+                    }
+                } else {
+                    // Windows 50ms timeout tripped, scope is still thinking
+                    maxRetries--; 
+                }
+            } else {
+                break; // Hardware error (cable unplugged)
             }
         }
 
         if (!synced) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            AddLog(LogDirection::ERR, "Waveform Sync Timeout. Purging buffers.");
+            PurgeComm(m_hSerial, PURGE_RXCLEAR | PURGE_TXCLEAR);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue; 
         }
 
@@ -165,11 +243,12 @@ void OscilloscopeManager::WorkerLoop() {
         // 7. If we got a perfect frame, lock the mutex and ship it to the UI!
         if (totalBytesRead == expectedDataBytes) {
             std::lock_guard<std::mutex> lock(m_dataMutex);
+            AddLog(LogDirection::RX, "Received waveform data.");
             m_latestData = incomingBuffer;
         }
 
         // Give the oscilloscope processor time to recover
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }
 
@@ -209,7 +288,9 @@ void OscilloscopeManager::SendCommand(const std::string& cmd) {
  * 1ms/div would be sent as 0.001, 500us/div would be sent as 0.0005, etc.
  */
 void OscilloscopeManager::SetTimebase(const float& timebase) {
-    std::string cmd = ":TIM:SCAL " + std::to_string(timebase) + "\n";
+    
+    char cmd[100];
+    std::snprintf(cmd, sizeof(cmd), ":TIM:SCAL %g \n", timebase);
     SendCommand(cmd);
 }
 
@@ -347,7 +428,7 @@ void OscilloscopeManager::drawConnectionControls() {
 
     ImGui::Begin("Connection Controls");
 
-    if (!m_isConnected){ // 1. Scan Button
+    if (!m_isRunning){ // 1. Scan Button
         if (ImGui::Button("Scan Ports") || !justScanned) {
             availablePorts = GetAvailableComPorts();
             if (!availablePorts.empty()) selectedPortIndex = 0; // Default to the first one found
@@ -575,10 +656,11 @@ void OscilloscopeManager::drawVerticalPositionControl(const int& channel) {
 void OscilloscopeManager::drawProbeAttenuationControl(const int& channel) {
     static int selectedAttenuation[4] = { 0, 0, 0, 0 }; // Default attenuation for 4 channels
     const char* attenuationTypes[] = { "1X", "10X", "100X" };
+    const char* attenuationValues[] = { "1", "10", "100" }; // Corresponding values for the SCPI command
 
     ImGui::Text("Channel %d Probe Attenuation", channel);
     if (ImGui::Combo(("##Attenuation##CHAN" + std::to_string(channel)).c_str(), &selectedAttenuation[channel - 1], attenuationTypes, IM_ARRAYSIZE(attenuationTypes))) {
-        SetProbeAttenuation(channel, attenuationTypes[selectedAttenuation[channel - 1]]);
+        SetProbeAttenuation(channel, attenuationValues[selectedAttenuation[channel - 1]]);
     }
 }
 
@@ -652,12 +734,10 @@ void OscilloscopeManager::drawMultiChannelControls(const std::vector<int>& chann
 
 void OscilloscopeManager::drawAllControls() {
     drawConnectionControls();
-    if (!m_isConnected) {
-        ImGui::Text("Please connect to an oscilloscope to access controls.");
-        return;
-    }
+    ImGui::Separator();
+    ImGui::Text(m_isRunning ? "Oscilloscope Controls" : "Connect to an oscilloscope to see controls");
 
-    if (m_isConnected) {
+    if (m_isRunning) {
         if (ImGui::CollapsingHeader("Basic Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
             drawAutoScaleButton();
             drawTriggerControl();
@@ -676,4 +756,44 @@ void OscilloscopeManager::drawAllControls() {
             drawBasicPloter(data);
         }
     }
+}
+
+void OscilloscopeManager::DrawSerialTerminal() {
+    ImGui::Begin("Serial Monitor");
+
+    if (ImGui::Button("Clear Log")) {
+        std::lock_guard<std::mutex> lock(m_logMutex);
+        m_terminalLog.clear();
+    }
+
+    ImGui::Separator();
+
+    // Create a scrolling box that takes up the rest of the window
+    ImGui::BeginChild("ScrollingRegion", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
+
+    m_logMutex.lock(); // Lock while drawing to prevent the background thread from crashing us
+    for (const auto& log : m_terminalLog) {
+        
+        if (log.direction == LogDirection::TX) {
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "[TX] -> %s", log.message.c_str());
+        } 
+        else if (log.direction == LogDirection::RX) {
+            ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "[RX] <- %s", log.message.c_str());
+        } 
+        else if (log.direction == LogDirection::INFO) {
+            ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "[SYS] %s", log.message.c_str());
+        }
+        else if (log.direction == LogDirection::ERR) {
+            ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "[ERR] %s", log.message.c_str());
+        }
+    }
+    m_logMutex.unlock();
+
+    // Auto-scroll to the bottom if we are already at the bottom
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+        ImGui::SetScrollHereY(1.0f);
+    }
+
+    ImGui::EndChild();
+    ImGui::End();
 }

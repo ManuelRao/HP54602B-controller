@@ -65,18 +65,8 @@ int main() {
         ImGui::NewFrame();
 
         {
-            g_oscilloscopeManager->drawConnectionControls();
-            g_oscilloscopeManager->drawTriggerControl();
-            g_oscilloscopeManager->drawTimebaseControl();
-            g_oscilloscopeManager->drawAcquisitionControl();
-            g_oscilloscopeManager->drawMeasurementControlls();
-            g_oscilloscopeManager->drawDisplayModeControl();
-            g_oscilloscopeManager->drawDataFormatControl();
-            g_oscilloscopeManager->drawMultiChannelControls({1, 2, 3, 4});
-            std::vector<uint8_t> latestData;
-            g_oscilloscopeManager->GetLatestData(latestData);
-            g_oscilloscopeManager->drawBasicPloter(latestData);
-           
+            g_oscilloscopeManager->drawAllControls();
+            g_oscilloscopeManager->DrawSerialTerminal();
         }
 
         //DEMO WINDOW (REMOVE LATER)

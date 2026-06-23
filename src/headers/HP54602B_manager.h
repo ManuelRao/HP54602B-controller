@@ -10,6 +10,18 @@
 #include "imgui.h"
 #include "HardwareUtils.h" // For COM port enumeration
 
+enum class LogDirection {
+    TX,     // Transmit (PC to Scope)
+    RX,     // Receive (Scope to PC)
+    INFO,   // System messages (Connected, Overrun Error, etc.)
+    ERR     // Hardware Errors
+};
+
+struct SerialLog {
+    LogDirection direction;
+    std::string message;
+};
+
 class OscilloscopeManager {
 private:
     // Threading controls
@@ -35,6 +47,11 @@ private:
 
     int m_timebaseIndex = 3;
     float verticalScale[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
+
+    std::vector<SerialLog> m_terminalLog;
+    std::mutex m_logMutex;
+
+    void AddLog(LogDirection dir, const std::string& msg);
 
     // The background loop function
     void WorkerLoop();
@@ -73,12 +90,14 @@ public:
     void SetChannelOnOff(const int& channel, bool on);
     void GetMeasurementResult(const std::string& measurementType, const int& channel, std::string& outResult);
     void GetCurrentSettings(std::unordered_map<std::string, std::string>& outSettings);
-
+    void GetWaveformData(std::vector<uint8_t>& outBuffer, const int& channel, const std::string& format);
+    
     // UI drawing function 
     //----------------------------------
     void drawAllControls();
     void drawConnectionControls();
     void drawBasicPloter(const std::vector<uint8_t>& data);
+    void DrawSerialTerminal();
     // individual control drawing functions for each setting category (called by drawControlUI)
     void drawAutoScaleButton();
     void drawTriggerControl();
